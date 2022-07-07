@@ -12,9 +12,9 @@ const run = async () => {
 
     console.log(`Beginning scan of cutsheet files in location: ${process.argv[2]}`)
     const cutsheets = []
+    const startTime = new Date().getTime()
     try {
         const dir = await fs.opendir(path);
-
         for await (const file of dir) {
             const cs = await openCutsheet(file)
             if (cs) cutsheets.push(cs)
@@ -22,7 +22,8 @@ const run = async () => {
     } catch (err) {
         console.error(err);
     } finally {
-        console.log(`Complete. Scanned ${cutsheets.length} cutsheets.`)
+        const seconds = (new Date().getTime() - startTime) / 1000
+        console.log(`Complete. Scanned ${cutsheets.length} cutsheets in ${seconds} seconds.`)
     }
 }
 
@@ -33,8 +34,7 @@ const openCutsheet = async (file) => {
     if (!(await checkIsCutsheet(file))) {
         return
     }
-    let cutsheet = {}
-    await createCutsheetObject(file)
+    let cutsheet = createCutsheetObject(file)
     return cutsheet
 }
 
@@ -68,16 +68,17 @@ const createCutsheetObject = async (file) => {
     try {
         const workbook = await createWorkbook(file)
         const sheet = workbook.Sheets['Cut List']
-        cutsheet = parseCutsheet(sheet, (x) => bar.increment(x))
+        cutsheet = await parseCutsheet(sheet, (x) => bar.increment(x))
     } catch (err) {
         console.log(err)
     } finally {
+        bar.update(100)
         bar.stop()
     }
     return cutsheet
 }
 
-const parseCutsheet = (sheet, bar) => {
+const parseCutsheet = async (sheet, bar) => {
     const cutsheet = {
         bomLines: 0,
         lumberCount: 0,
@@ -89,7 +90,6 @@ const parseCutsheet = (sheet, bar) => {
     }
     cutsheet.bomLines = getBomLines(sheet)
     const increment = 100 / cutsheet.bomLines
-
     for (let i = dataStartRow; i < cutsheet.bomLines + dataStartRow; i++) {
         const category = getCategory(sheet[cell(col.pn, i)].v)
         switch (category) {
@@ -107,9 +107,9 @@ const parseCutsheet = (sheet, bar) => {
             default:
                 cutsheet.otherCount += sheet[cell(col.qty, i)].v
         }
+        await sleep(3) // just to make it look cool
         bar(increment)
     }
-    bar(1)
     return cutsheet
 }
 
@@ -130,6 +130,12 @@ const createWorkbook = async (file) => {
 
 const cell = (c, r) => {
     return XLSX.utils.encode_cell({ c: c, r: r })
+}
+
+function sleep(ms) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms)
+    })
 }
 
 run()
