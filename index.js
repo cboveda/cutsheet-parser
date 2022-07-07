@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx/xlsx.mjs'
 import * as fs from 'fs/promises'
 import * as cli from 'cli-progress'
+import { col, categories, dataStartRow } from './references.js'
 
 const run = async () => {
     const path = process.argv[2]
@@ -9,19 +10,23 @@ const run = async () => {
         process.exit(1)
     }
 
+    console.log(`Beginning scan of cutsheet files in location: ${process.argv[2]}`)
+    const cutsheets = []
     try {
         const dir = await fs.opendir(path);
-        let cutsheets = []
+
         for await (const file of dir) {
-            let cs = await parseCutsheet(file)
+            const cs = await openCutsheet(file)
             if (cs) cutsheets.push(cs)
         }
     } catch (err) {
         console.error(err);
+    } finally {
+        console.log(`Complete. Scanned ${cutsheets.length} cutsheets.`)
     }
 }
 
-const parseCutsheet = async (file) => {
+const openCutsheet = async (file) => {
     if (!checkIsXlsx(file)) {
         return
     }
@@ -29,7 +34,7 @@ const parseCutsheet = async (file) => {
         return
     }
     let cutsheet = {}
-    createCutsheetObject(file)
+    await createCutsheetObject(file)
     return cutsheet
 }
 
@@ -42,8 +47,7 @@ const checkIsXlsx = (file) => {
 const checkIsCutsheet = async (file) => {
     let check = false;
     try {
-        let data = await fs.readFile(process.argv[2].concat(file.name))
-        let workbook = await XLSX.read(data)
+        const workbook = await createWorkbook(file)
         if (workbook.Sheets['Cut List'].A1.v == 'CrateMaker')
             check = true
     } finally {
@@ -52,22 +56,80 @@ const checkIsCutsheet = async (file) => {
 }
 
 const createCutsheetObject = async (file) => {
-    const cutsheet = {}
-    const bar = new cli.SingleBar({ format: '|{bar}| {percentage}% :: ' + file.name, hideCursor: true })
+    let cutsheet = {}
+    const bar = new cli.SingleBar({
+        format: '|{bar}| {percentage}% || ' + file.name,
+        hideCursor: true,
+        barCompleteChar: '\u2588',
+        barIncompleteChar: '\u2591',
+    })
     bar.start(100, 0)
-    for (let i = 0; i < 10; i++) {
-        bar.increment(10)
-        await sleep(500)
+
+    try {
+        const workbook = await createWorkbook(file)
+        const sheet = workbook.Sheets['Cut List']
+        cutsheet = parseCutsheet(sheet, (x) => bar.increment(x))
+    } catch (err) {
+        console.log(err)
+    } finally {
+        bar.stop()
     }
-    bar.stop()
+    return cutsheet
 }
 
-function sleep(ms) {
-    return new Promise((resolve) => {
-        setTimeout(resolve, ms)
-    })
+const parseCutsheet = (sheet, bar) => {
+    const cutsheet = {
+        bomLines: 0,
+        lumberCount: 0,
+        lumberLength: 0,
+        plyCount: 0,
+        plySquareFeet: 0,
+        foamCount: 0,
+        otherCount: 0,
+    }
+    cutsheet.bomLines = getBomLines(sheet)
+    const increment = 100 / cutsheet.bomLines
+
+    for (let i = dataStartRow; i < cutsheet.bomLines + dataStartRow; i++) {
+        const category = getCategory(sheet[cell(col.pn, i)].v)
+        switch (category) {
+            case 'lumber':
+                cutsheet.lumberCount += sheet[cell(col.qty, i)].v
+                cutsheet.lumberLength += sheet[cell(col.length, i)].v
+                break
+            case 'ply':
+                cutsheet.plyCount += sheet[cell(col.qty, i)].v
+                cutsheet.plySquareFeet += Math.round(sheet[cell(col.length, i)].v * sheet[cell(col.width, i)].v / 144, 2)
+                break
+            case 'foam':
+                cutsheet.foamCount += sheet[cell(col.qty, i)].v
+                break
+            default:
+                cutsheet.otherCount += sheet[cell(col.qty, i)].v
+        }
+        bar(increment)
+    }
+    bar(1)
+    return cutsheet
+}
+
+const getBomLines = (sheet) => {
+    let i = dataStartRow
+    while (sheet[cell(0, i)]) i++
+    return i - dataStartRow
+}
+
+const getCategory = (pn) => {
+    return categories[pn.slice(0, 3)]
+}
+
+const createWorkbook = async (file) => {
+    const data = await fs.readFile(process.argv[2].concat(file.name))
+    return await XLSX.read(data)
+}
+
+const cell = (c, r) => {
+    return XLSX.utils.encode_cell({ c: c, r: r })
 }
 
 run()
-
-
