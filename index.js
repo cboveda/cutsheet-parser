@@ -15,10 +15,16 @@ const run = async () => {
     const startTime = new Date().getTime()
     try {
         const dir = await fs.opendir(path);
+
+        // TODO: Use a map with the PN as key so I can check for duplicates
+
         for await (const file of dir) {
             const cs = await openCutsheet(file)
             if (cs) cutsheets.push(cs)
         }
+
+        // cutsheets.forEach(cs => console.dir(cs))
+
     } catch (err) {
         console.error(err);
     } finally {
@@ -64,7 +70,6 @@ const createCutsheetObject = async (file) => {
         barIncompleteChar: '\u2591',
     })
     bar.start(100, 0)
-
     try {
         const workbook = await createWorkbook(file)
         const sheet = workbook.Sheets['Cut List']
@@ -80,7 +85,6 @@ const createCutsheetObject = async (file) => {
 
 const parseCutsheet = async (sheet, bar) => {
     const cutsheet = {
-        bomLines: 0,
         lumberCount: 0,
         lumberLength: 0,
         plyCount: 0,
@@ -89,7 +93,15 @@ const parseCutsheet = async (sheet, bar) => {
         otherCount: 0,
     }
     cutsheet.bomLines = getBomLines(sheet)
-    const increment = 100 / cutsheet.bomLines
+    cutsheet.pn = /\d{3}-\d{5}/.exec(sheet[cell(6, 0)].v)[0]
+    const odString = /(?<=O\.D\.:\s).*/.exec(sheet[cell(8, 0)].v)[0]
+    const odArr = odString.split('x').map(d => d.trim())
+    cutsheet.odLength = parseFloat(odArr[0])
+    cutsheet.odWidth = parseFloat(odArr[1])
+    cutsheet.odHeight = parseFloat(odArr[2])
+    cutsheet.cuft = Math.round(cutsheet.odLength * cutsheet.odWidth * cutsheet.odHeight / Math.pow(12, 3))
+
+    const increment = 90 / cutsheet.bomLines
     for (let i = dataStartRow; i < cutsheet.bomLines + dataStartRow; i++) {
         const category = getCategory(sheet[cell(col.pn, i)].v)
         switch (category) {
@@ -107,7 +119,7 @@ const parseCutsheet = async (sheet, bar) => {
             default:
                 cutsheet.otherCount += sheet[cell(col.qty, i)].v
         }
-        await sleep(3) // just to make it look cool
+        //await sleep(3) // just to make it look cool
         bar(increment)
     }
     return cutsheet
