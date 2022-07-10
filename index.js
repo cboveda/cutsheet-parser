@@ -11,25 +11,22 @@ const run = async () => {
     }
 
     console.log(`Beginning scan of cutsheet files in location: ${process.argv[2]}`)
-    const cutsheets = []
+    const cutsheets = new Map()
     const startTime = new Date().getTime()
     try {
         const dir = await fs.opendir(path);
-
-        // TODO: Use a map with the PN as key so I can check for duplicates
-
         for await (const file of dir) {
             const cs = await openCutsheet(file)
-            if (cs) cutsheets.push(cs)
+            if (cs) cutsheets.set(cs.pn, cs)
         }
-
-        // cutsheets.forEach(cs => console.dir(cs))
+        console.log(cutsheets.size)
+        for (let cs of cutsheets.values()) console.dir(cs)
 
     } catch (err) {
         console.error(err);
     } finally {
         const seconds = (new Date().getTime() - startTime) / 1000
-        console.log(`Complete. Scanned ${cutsheets.length} cutsheets in ${seconds} seconds.`)
+        console.log(`Complete. Found ${cutsheets.size} cutsheets in ${seconds} seconds.`)
     }
 }
 
